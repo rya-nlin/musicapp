@@ -7,6 +7,15 @@
 import SwiftUI
 import MusicKit
 
+struct AlbumFolder: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+
+    init(id: UUID = UUID(), name: String) {
+        self.id = id
+        self.name = name
+    }
+}
 struct MusicAuthorizationQuery
 {
     static func request() async -> MusicAuthorization.Status{
@@ -26,7 +35,21 @@ func getAlbums() async {
 struct ContentView: View {
     @State private var status: MusicAuthorization.Status = .notDetermined
     @State private var currentAlbum: String = "No album playing"
-    let player = ApplicationMusicPlayer.shared
+    @State private var albums: [Album] = []
+    @State private var folders: [AlbumFolder] = []
+    @State private var assignments: [String: UUID] = [:]
+    @State private var selectedFolderID: UUID?
+    @State private var showingCreateFolderAlert = false
+    @State private var newFolderName = ""
+    //creating state variables - local within view
+    @AppStorage("music_app_folders") private var storedFolders = ""
+    @AppStorage("music_app_album_folder_assignments") private var storedAssignments = ""
+    //appstorage variables retain when closing app
+    private let player = ApplicationMusicPlayer.shared
+    var filteredAlbums: [Album] {
+        guard let selectedFolderID else { return albums }
+        return albums.filter { assignments[albumKey(for: $0)] == selectedFolderID }
+    } //filteredalbums returns list of albums in a folder
     var body : some View{
         VStack(spacing: 20) {
             Button("Play Random Album") {
