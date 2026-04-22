@@ -3,7 +3,7 @@
 //  music app
 //
 //  Created by Ryan Lin on 5/8/25.
-//rn it js has a button and plays a random album from users apple music library
+//
 import SwiftUI
 import MusicKit
 
@@ -22,6 +22,7 @@ struct MusicAuthorizationQuery
         return await MusicAuthorization.request()
     }
 }
+//access user apple music library
 func getAlbums() async {
     do{
         let request = MusicLibraryRequest<Album>() //fetch all albums in user library
@@ -50,22 +51,100 @@ struct ContentView: View {
         guard let selectedFolderID else { return albums }
         return albums.filter { assignments[albumKey(for: $0)] == selectedFolderID }
     } //filteredalbums returns list of albums in a folder
-    var body : some View{
-        VStack(spacing: 20) {
-            Button("Play Random Album") {
-                Task {
-                    await playRandomAlbumQueue(count: 3)
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Text(currentAlbum)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+
+                Picker("Folder", selection: $selectedFolderID) {
+                    Text("All Albums").tag(UUID?.none)
+                    ForEach(folders) { folder in
+                        Text(folder.name).tag(Optional(folder.id))
+                    }
+                }
+                .pickerStyle(.menu)
+
+                HStack {
+                    Button("Play Random Album") {
+                        Task {
+                            await playRandomAlbum()
+                        }
+                    }
+                    .disabled(status != .authorized || filteredAlbums.isEmpty)
+
+                    Button("Skip Album") {
+                        Task {
+                            await skipAlbum()
+                        }
+                    }
+                    .disabled(status != .authorized)
+                }
+
+                Button("Create Folder") {
+                    newFolderName = ""
+                    showingCreateFolderAlert = true
+                }
+                .disabled(status != .authorized)
+
+                if status == .authorized {
+                    List {
+                        if !folders.isEmpty {
+                            Section("Folders") {
+                                ForEach(folders) { folder in
+                                    HStack {
+                                        Text(folder.name)
+                                        Spacer()
+                                        Text("\(albumCount(in: folder))")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .onDelete(perform: deleteFolders)
+                            }
+                        }
+
+                        Section(selectedFolderID == nil ? "All Albums" : "Albums In Folder") {
+                            if filteredAlbums.isEmpty {
+                                Text(emptyStateMessage)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(filteredAlbums, id: \.id) { album in
+                                    albumRow(for: album)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Text("Authorize Apple Music access to load your library.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
             }
-            .disabled(status != .authorized)
+            .padding()
+            .navigationTitle("Music Folders")
         }
         .task {
+            loadSavedData()
             status = await MusicAuthorization.request()
+            if status == .authorized {
+                await loadAlbums()
+            } else {
+                currentAlbum = "Apple Music access not granted"
+            }
         }
-        
-        
-        
+        .alert("New Folder", isPresented: $showingCreateFolderAlert) {
+            TextField("Folder name", text: $newFolderName)
+            Button("Create") {
+                createFolder()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Create a folder to organize albums from your library.")
+        }
     }
+    
     func playRandomAlbumQueue(count: Int) async {
         guard status == .authorized else { return }
         
