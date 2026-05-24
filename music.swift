@@ -145,6 +145,60 @@ struct ContentView: View {
         }
     }
     
+ @ViewBuilder
+    private func albumRow(for album: Album) -> some View {
+        let key = albumKey(for: album)
+        let assignedFolderID = assignments[key]
+        let assignedFolderName = folders.first(where: { $0.id == assignedFolderID })?.name ?? "No folder"
+
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(album.title)
+                    .font(.headline)
+                Text(album.artistName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(assignedFolderName)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            Menu("Move") {
+                Button("No Folder") {
+                    unassignAlbum(album)
+                }
+
+                ForEach(folders) { folder in
+                    Button(folder.name) {
+                        assignAlbum(album, to: folder.id)
+                    }
+                }
+            }
+        }
+    }
+  private var emptyStateMessage: String {
+        if albums.isEmpty {
+            return "No albums found in your library."
+        }
+        if selectedFolderID != nil {
+            return "No albums in this folder yet."
+        }
+        return "No albums available."
+    }
+
+    private func loadAlbums() async {
+        do {
+            let request = MusicLibraryRequest<Album>()
+            let response = try await request.response()
+            albums = Array(response.items)
+            currentAlbum = albums.isEmpty ? "No albums found" : "Loaded \(albums.count) albums"
+        } catch {
+            currentAlbum = "Library error: \(error.localizedDescription)"
+        }
+    }
+
     func playRandomAlbumQueue(count: Int) async {
         guard status == .authorized else { return }
         
@@ -176,6 +230,80 @@ struct ContentView: View {
             print("skip error",error)
         }
         
+    }
+      private func createFolder() {
+        let trimmedName = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return }
+
+        folders.append(AlbumFolder(name: trimmedName))
+        folders.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        saveFolders()
+    }
+
+    private func deleteFolders(at offsets: IndexSet) {
+        let idsToDelete = offsets.map { folders[$0].id }
+
+        for folderID in idsToDelete {
+            assignments = assignments.filter { $0.value != folderID }
+            if selectedFolderID == folderID {
+                selectedFolderID = nil
+            }
+        }
+
+        folders.remove(atOffsets: offsets)
+        saveFolders()
+        saveAssignments()
+    }
+
+    private func assignAlbum(_ album: Album, to folderID: UUID) {
+        assignments[albumKey(for: album)] = folderID
+        saveAssignments()
+    }
+
+    private func unassignAlbum(_ album: Album) {
+        assignments.removeValue(forKey: albumKey(for: album))
+        saveAssignments()
+    }
+  private func albumCount(in folder: AlbumFolder) -> Int {
+        albums.filter { assignments[albumKey(for: $0)] == folder.id }.count
+    }
+
+    private func albumKey(for album: Album) -> String {
+        "\(album.title.lowercased())|\(album.artistName.lowercased())"
+    }
+
+    private func loadSavedData() {
+        folders = decode([AlbumFolder].self, from: storedFolders) ?? []
+
+        if let rawAssignments = decode([String: String].self, from: storedAssignments) {
+            assignments = rawAssignments.reduce(into: [:]) { partialResult, item in
+                if let uuid = UUID(uuidString: item.value) {
+                    partialResult[item.key] = uuid
+                }
+            }
+        }
+    }
+
+    private func saveFolders() {
+        storedFolders = encode(folders)
+    }
+
+    private func saveAssignments() {
+        let rawAssignments = assignments.mapValues(\.uuidString)
+        storedAssignments = encode(rawAssignments)
+    }
+
+    private func encode<T: Encodable>(_ value: T) -> String {
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(value),
+              let string = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return string
+    }
+    private func decode<T: Decodable>(_ type: T.Type, from string: String) -> T? {
+        guard let data = string.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
     }
 }
 #Preview {
