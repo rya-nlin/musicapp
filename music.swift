@@ -106,6 +106,23 @@ final class MusicLibraryStore: ObservableObject {
         folder.albumKeys.count
     }
 
+    // MARK: - Collecting dust
+
+    /// Albums not played in at least `days` days (or never played), oldest/never-played first.
+    func dustyAlbums(olderThanDays days: Int) -> [Album] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? .distantPast
+        return albums
+            .filter { ($0.lastPlayedDate ?? .distantPast) < cutoff }
+            .sorted { ($0.lastPlayedDate ?? .distantPast) < ($1.lastPlayedDate ?? .distantPast) }
+    }
+
+    func dustDescription(for album: Album) -> String {
+        guard let lastPlayedDate = album.lastPlayedDate else { return "Never played" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return "Last played \(formatter.localizedString(for: lastPlayedDate, relativeTo: Date()))"
+    }
+
     /// Albums in the folder's stored order, front to back.
     func orderedAlbums(in folder: AlbumFolder) -> [Album] {
         let albumsByKey = Dictionary(uniqueKeysWithValues: albums.map { (albumKey(for: $0), $0) })
@@ -222,6 +239,19 @@ struct ContentView: View {
                 }
             }
             .tabItem { Label("Folders", systemImage: "folder") }
+
+            NavigationStack {
+                Group {
+                    if store.status == .authorized {
+                        DustyAlbumsView(store: store)
+                    } else {
+                        unauthorizedView
+                    }
+                }
+                .navigationTitle("Collecting Dust")
+            }
+            .tabItem { Label("Collecting Dust", systemImage: "moon.zzz.fill") }
+            .badge(store.status == .authorized ? store.dustyAlbums(olderThanDays: 90).count : 0)
         }
         .safeAreaInset(edge: .bottom) {
             if store.status == .authorized {
@@ -463,6 +493,56 @@ struct FolderDetailView: View {
             } else {
                 Text("Folder not found")
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct DustyAlbumsView: View {
+    @ObservedObject var store: MusicLibraryStore
+    @State private var thresholdDays = 90
+
+    private var dustyAlbums: [Album] {
+        store.dustyAlbums(olderThanDays: thresholdDays)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Not played in", selection: $thresholdDays) {
+                Text("1 month").tag(30)
+                Text("3 months").tag(90)
+                Text("6 months").tag(182)
+                Text("1 year").tag(365)
+            }
+            .pickerStyle(.segmented)
+            .padding()
+
+            if dustyAlbums.isEmpty {
+                Spacer()
+                Text("Nothing collecting dust — nice work.")
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                List(dustyAlbums, id: \.id) { album in
+                    Button {
+                        Task { await store.play(album: album) }
+                    } label: {
+                        HStack {
+                            AlbumArtworkView(artwork: album.artwork, size: 50)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(album.title).font(.body)
+                                Text(album.artistName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(store.dustDescription(for: album))
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.plain)
             }
         }
     }
